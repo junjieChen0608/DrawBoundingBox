@@ -28,12 +28,10 @@
 struct MyLeaf {
   int pointCount;
   double runningSum, runningAvg;
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud;
 
   MyLeaf() : pointCount(0),
              runningSum(0.0),
-             runningAvg(0.0),
-             cloud(new pcl::PointCloud<pcl::PointXYZRGB> ()) {}
+             runningAvg(0.0) {}
 };
 
 inline int computeSingleCoord(Eigen::Vector3i& divb_mul_, Eigen::Vector3i& min_b_,
@@ -48,11 +46,9 @@ inline int computeSingleCoord(Eigen::Vector3i& divb_mul_, Eigen::Vector3i& min_b
   return static_cast<int> (floor((ijk + min_b_[i]) / inverse_leaf_size[i]));
 }
 
-inline void computeCoord(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
-                         Eigen::Vector3i& divb_mul_, Eigen::Vector3i& min_b_,
-                         Eigen::Array3f& inverse_leaf_size, int idx,
-                         boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer,
-                         double leafSize) {
+inline void
+computeCoord(int idx, Eigen::Vector3i &divb_mul_, Eigen::Vector3i &min_b_, Eigen::Array3f &inverse_leaf_size,
+             std::unordered_map<int, std::vector<int>> &coordMap) {
 
   // check if this idx is in the leaf first
 
@@ -78,10 +74,7 @@ inline void computeCoord(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
 
 //  std::cout << "idx: " << idx
 //             << " -> (" << x << ", " << y << ", " << z << ")\n";
-  viewer->addCube(x, x + leafSize, y, y + leafSize, z, z + leafSize,
-                  0.0, 1.0, 0.0, "cube" + std::to_string(idx));
-  viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_REPRESENTATION,
-                                      pcl::visualization::PCL_VISUALIZER_REPRESENTATION_WIREFRAME, "cube" + std::to_string(idx));
+  coordMap.emplace(idx, std::vector<int>{x, y, z});
 }
 
 inline int calculateIndex(pcl::PointXYZ &p,
@@ -121,7 +114,7 @@ inline void crossReference(std::unordered_map<int, MyLeaf> &visited,
        it != leaves.end(); ++it) {
     int idx = it->first;
     int ref_count = it->second.nr_points;
-    int actual_count = visited[idx].cloud->size();
+    int actual_count = visited[idx].pointCount;
     if (ref_count != actual_count) {
       std::cout << "point count does not match in index " << idx << "\n";
       break;
@@ -144,56 +137,39 @@ inline void crossReference(std::unordered_map<int, MyLeaf> &visited,
 
 }
 
-inline void drawCube(std::stringstream &id, std::unordered_map<int, MyLeaf>::iterator it,
-                     std::map<size_t, pcl::VoxelGridCovariance<pcl::PointXYZ>::Leaf> &leaves,
-                     boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer, const float &leafSize) {
+inline void drawCube(const int &id, boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer, const float &leafSize,
+                     std::vector<int> &coord) {
 
-  id << it->first << "_cube";
-  auto leaf = leaves[it->first];
-  Eigen::VectorXf centroid = leaf.centroid;
-  viewer->addCube(Eigen::Vector3f(centroid[0], centroid[1], centroid[2]), Eigen::Quaternionf::Identity(), leafSize, leafSize, leafSize, id.str());
+  std::stringstream ss;
+  ss << id;
+  int x = coord[0];
+  int y = coord[1];
+  int z = coord[2];
+  viewer->addCube(x, x + leafSize, y, y + leafSize, z, z + leafSize,
+                  0.0, 1.0, 0.0, ss.str());
+
   viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_REPRESENTATION,
-                                      pcl::visualization::PCL_VISUALIZER_REPRESENTATION_WIREFRAME, id.str());
-  viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR,
-                                      0.0, 1.0, 0.0, id.str());
-  viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_OPACITY, 0.1, id.str());
-  id.str(""); // clear the buffer
+                                      pcl::visualization::PCL_VISUALIZER_REPRESENTATION_WIREFRAME, ss.str());
+
+  viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_OPACITY, 0.1, ss.str());
 
 }
 
-inline void drawBoundingBox(std::stringstream &id, pcl::PointXYZRGB &minPt, pcl::PointXYZRGB &maxPt,
-                     boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer) {
-
-    id << "_bbox"; // id_bbox as bounding box id
-    viewer->addCube(minPt.x, maxPt.x, minPt.y, maxPt.y, minPt.z, maxPt.z, 1.0, 0.0, 0.0, id.str());
-    viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_REPRESENTATION,
-                                        pcl::visualization::PCL_VISUALIZER_REPRESENTATION_WIREFRAME, id.str());
-    viewer->setShapeRenderingProperties(pcl::visualization::PCL_VISUALIZER_OPACITY, 0.8, id.str());
-    id.str("");
-
-}
-
-void visualize(pcl::PointCloud<pcl::PointXYZ>::Ptr targetCloud,
-               std::unordered_map<int, MyLeaf> &visited,
-               std::map<size_t, pcl::VoxelGridCovariance<pcl::PointXYZ>::Leaf> &leaves, const float &leafSize) {
+void visualize(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudWithProb,
+               std::unordered_map<int, std::vector<int>> &coordMap,
+               const float &leafSize) {
 
   boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer(new pcl::visualization::PCLVisualizer("3D Viewer"));
   viewer->setBackgroundColor(0, 0, 0);
   viewer->addCoordinateSystem(1.0);
   viewer->initCameraParameters();
+  std::string cloudId = "cloud";
+  viewer->addPointCloud(cloudWithProb, cloudId);
+  viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1.2, cloudId);
 
-  std::stringstream id;
-
-  // iterate on the visited map, each MyLeaf structure has a point cloud
-  for(auto it = visited.begin(); it != visited.end(); ++it) {
-
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr currentPointCloud = it->second.cloud;
-
-    id << it->first; // use the index as cloud id
-    viewer->addPointCloud(currentPointCloud, id.str());
-    viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1.2, id.str());
-
-    drawCube(id, it, leaves, viewer, leafSize);
+  // iterate on each index and draw bounding box according to its coordinate
+  for (auto it = coordMap.begin(); it != coordMap.end(); ++it) {
+    drawCube(it->first, viewer, leafSize, it->second);
   }
 
   while (!viewer->wasStopped()) {
@@ -212,14 +188,23 @@ inline void initRGBPoint(pcl::PointXYZRGB &newP, pcl::PointXYZ &p, const uint8_t
   newP.b = color;
 }
 
+void generateCoordMap(std::unordered_map<int, std::vector<int>> &coordMap,
+                      std::map<size_t, pcl::VoxelGridCovariance<pcl::PointXYZ>::Leaf> &leaves,
+                      Eigen::Vector3i &divb_mul_, Eigen::Vector3i &min_b_, Eigen::Array3f &inverse_leaf_size_) {
+
+  for (auto it = leaves.begin(); it != leaves.end(); ++it) {
+    computeCoord(it->first, divb_mul_, min_b_, inverse_leaf_size_, coordMap);
+  }
+}
+
 int main(int argc, char** argv) {
 
   std::string out_path = "/home/junjie.chen/CLionProjects/pcl_voxelgridcovar/";
 
   // load target point cloud
   pcl::PointCloud<pcl::PointXYZ>::Ptr targetCloud(new pcl::PointCloud<pcl::PointXYZ> ());
-//  std::string in_file_path = "/media/junjie.chen/data/hitbox/A/200/A_0deg00000.pcd";
-  std::string in_file_path = "room_scan1.pcd";
+  std::string in_file_path = "/media/junjie.chen/data/hitbox/A/200/A_0deg00000.pcd";
+//  std::string in_file_path = "room_scan1.pcd";
   pcl::io::loadPCDFile<pcl::PointXYZ>(in_file_path, *targetCloud);
   std::cout << "point cloud size: " << targetCloud->size() << "\n";
 
@@ -243,9 +228,12 @@ int main(int argc, char** argv) {
   Eigen::Vector3i min_b_ = covar.getMinBoxCoordinates();
   Eigen::Vector3i divb_mul_ = covar.getDivisionMultiplier();
 
-  std::cout << "min b: " << min_b_.transpose()
-            << "\ndiv mul: " << divb_mul_.transpose()
-            << "\ninv leaf size: " << inverse_leaf_size_.transpose() << "\n";
+//  std::cout << "min b: " << min_b_.transpose()
+//            << "\ndiv mul: " << divb_mul_.transpose()
+//            << "\ninv leaf size: " << inverse_leaf_size_.transpose() << "\n";
+
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudWithProb(new pcl::PointCloud<pcl::PointXYZRGB> ());
+  cloudWithProb->points.reserve(targetCloud->points.size());
 
   // iterate on all points from the target cloud to generate data for MyLeaf
   for (pcl::PointXYZ& p : targetCloud->points) {
@@ -271,7 +259,7 @@ int main(int argc, char** argv) {
     uint8_t color = 255 * probability;
     pcl::PointXYZRGB newP;
     initRGBPoint(newP, p, color);
-    currentLeaf.cloud->points.emplace_back(newP);
+    cloudWithProb->points.emplace_back(newP);
   }
 
   std::cout << "visited map size: " << visited.size() << "\n";
@@ -284,31 +272,9 @@ int main(int argc, char** argv) {
   // cross reference the point count of each index in visited map with leaves from covar
   crossReference(visited, leaves, distCloud);
 
-  visualize(targetCloud, visited, leaves, leafSize);
+  std::unordered_map<int, std::vector<int>> coordMap;
+  generateCoordMap(coordMap, leaves, divb_mul_, min_b_, inverse_leaf_size_);
+  visualize(cloudWithProb, coordMap, leafSize);
 
   return 0;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// 2018.08.10
-// suspended attempt with octomap, since Martin has replied email to use POV-Ray
-
-//  double resolution = 0.5;
-//  std::string octree_file_name = "car_scene.ot";
-//  // generate octree from point cloud
-//  generateOcTree(resolution, *targetCloud, out_path, octree_file_name);
-
-// ******************************** suspended ***********************************
