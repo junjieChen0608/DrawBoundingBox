@@ -14,12 +14,9 @@
 #include <pcl/registration/icp.h>
 #include <pcl/visualization/pcl_visualizer.h>
 #include <pcl/filters/voxel_grid_covariance.h>
+#include <pcl/filters/crop_box.h>
 
 #include <boost/thread/thread.hpp>
-
-#include <octomap/octomap.h>
-#include <octomap/OcTree.h>
-#include <octomap/ColorOcTree.h>
 
 /**
  * wrapper class containing info
@@ -97,9 +94,9 @@ inline double computeProbability(pcl::PointXYZ &p,
   Eigen::Vector3d& mean = leaf.mean_;
   Eigen::Vector3d diff(p.x - mean[0], p.y - mean[1], p.z - mean[2]);
   Eigen::Matrix<double, 1, 3> diff_transpose = diff.transpose();
-  Eigen::Matrix<double, 1, 1> result_mat = diff_transpose * leaf.icov_* diff;
+  double intermediateResult = diff_transpose * leaf.icov_* diff;
 
-  double result = -result_mat(0, 0) * 0.5;
+  double result = -intermediateResult * 0.5;
 //  std::cout << "prob " << exp(result) << "\n";
   return exp(result);
 
@@ -197,6 +194,26 @@ void generateCoordMap(std::unordered_map<int, std::vector<int>> &coordMap,
   }
 }
 
+void cropGlobalFuseMap(float x, float y, float z,
+                       float len, float height) {
+  pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>());
+  std::string inputPath = "/media/junjie.chen/data/";
+  std::string inputFileName = "global_fuse.pcd";
+  pcl::io::loadPCDFile(inputPath + inputFileName, *cloud);
+  std::cout << "input cloud has " << cloud->size() << " pts\n";
+
+  pcl::PointCloud<pcl::PointXYZ>::Ptr croppedCloud(new pcl::PointCloud<pcl::PointXYZ>());
+  pcl::CropBox<pcl::PointXYZ> cropBox;
+  cropBox.setMin(Eigen::Vector4f(x, y, z, 1.0));
+  cropBox.setMax(Eigen::Vector4f(x + len, y + len, z + height, 1.0));
+  cropBox.setInputCloud(cloud);
+  cropBox.filter(*croppedCloud);
+  std::cout << "cropped cloud has " << croppedCloud->size() << "pts\n";
+
+  std::string outputFileName = "global_fuse_cropped.pcd";
+  pcl::io::savePCDFileASCII(inputPath + outputFileName, *croppedCloud);
+}
+
 int main(int argc, char** argv) {
 
   std::string out_path = "/home/junjie.chen/CLionProjects/pcl_voxelgridcovar/";
@@ -204,7 +221,11 @@ int main(int argc, char** argv) {
   // load target point cloud
   pcl::PointCloud<pcl::PointXYZ>::Ptr targetCloud(new pcl::PointCloud<pcl::PointXYZ> ());
   std::string in_file_path = "/media/junjie.chen/data/hitbox/A/200/A_0deg00000.pcd";
-//  std::string in_file_path = "room_scan1.pcd";
+//  std::string in_file_path = "/media/junjie.chen/data/repo/DrawBoundingBox/cmake-build-debug/room_scan1.pcd";
+
+//  cropGlobalFuseMap(-800.0, -600.0, 0.0, 500.0, 50.0);
+//  std::string in_file_path = "/media/junjie.chen/data/global_fuse_cropped.pcd";
+
   pcl::io::loadPCDFile<pcl::PointXYZ>(in_file_path, *targetCloud);
   std::cout << "point cloud size: " << targetCloud->size() << "\n";
 
