@@ -4,6 +4,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <cmath>
+#include <string>
 
 #include <pcl/common/common.h>
 #include <pcl/io/io.h>
@@ -31,6 +32,7 @@ struct MyLeaf {
              runningAvg(0.0) {}
 };
 
+// helper function to compute coordinate for each axis
 inline int computeSingleCoord(Eigen::Vector3i& divb_mul_, Eigen::Vector3i& min_b_,
                               Eigen::Array3f& inverse_leaf_size, int idx, int i) {
   int ijk;
@@ -43,11 +45,9 @@ inline int computeSingleCoord(Eigen::Vector3i& divb_mul_, Eigen::Vector3i& min_b
   return static_cast<int> (floor((ijk + min_b_[i]) / inverse_leaf_size[i]));
 }
 
-inline void
-computeCoord(int idx, Eigen::Vector3i &divb_mul_, Eigen::Vector3i &min_b_, Eigen::Array3f &inverse_leaf_size,
+inline void computeCoord(int idx, Eigen::Vector3i &divb_mul_,
+             Eigen::Vector3i &min_b_, Eigen::Array3f &inverse_leaf_size,
              std::unordered_map<int, std::vector<int>> &coordMap) {
-
-  // check if this idx is in the leaf first
 
   /**
    * solve ijk0
@@ -69,11 +69,10 @@ computeCoord(int idx, Eigen::Vector3i &divb_mul_, Eigen::Vector3i &min_b_, Eigen
    */
   int z = computeSingleCoord(divb_mul_, min_b_, inverse_leaf_size, idx, 2);
 
-//  std::cout << "idx: " << idx
-//             << " -> (" << x << ", " << y << ", " << z << ")\n";
   coordMap.emplace(idx, std::vector<int>{x, y, z});
 }
 
+// compute the index of cell to which the given point belongs
 inline int calculateIndex(pcl::PointXYZ &p,
                           pcl::VoxelGridCovariance<pcl::PointXYZ> &covar,
                           Eigen::Array3f &inverse_leaf_size_,
@@ -88,6 +87,7 @@ inline int calculateIndex(pcl::PointXYZ &p,
 
 }
 
+// compute the probability of given point in its belonging cell
 inline double computeProbability(pcl::PointXYZ &p,
                                  pcl::VoxelGridCovariance<pcl::PointXYZ>::Leaf &leaf) {
 
@@ -97,18 +97,19 @@ inline double computeProbability(pcl::PointXYZ &p,
   double intermediateResult = diff_transpose * leaf.icov_* diff;
 
   double result = -intermediateResult * 0.5;
-//  std::cout << "prob " << exp(result) << "\n";
+
   return exp(result);
 
 }
 
+// cross reference each MyLeaf struct with the original leaves
+// this is a way to check whether each MyLeaf has the right points
 inline void crossReference(std::unordered_map<int, MyLeaf> &visited,
                            std::map<size_t, pcl::VoxelGridCovariance<pcl::PointXYZ>::Leaf> &leaves,
                            pcl::PointCloud<pcl::PointXYZ> &distCloud) {
 
   int ones = 0, nonOnes = 0;
-  for (std::map<size_t, pcl::VoxelGridCovariance<pcl::PointXYZ>::Leaf>::iterator it = leaves.begin();
-       it != leaves.end(); ++it) {
+  for (auto it = leaves.begin(); it != leaves.end(); ++it) {
     int idx = it->first;
     int ref_count = it->second.nr_points;
     int actual_count = visited[idx].pointCount;
@@ -117,14 +118,12 @@ inline void crossReference(std::unordered_map<int, MyLeaf> &visited,
       break;
     }
     Eigen::VectorXf leafCentroid = it->second.centroid;
-//    std::cout << "idx: " << it->first << " " << it->second.nr_points << " pts\n";
+
     distCloud.points.emplace_back(pcl::PointXYZ(leafCentroid[0], leafCentroid[1], leafCentroid[2]));
 
-//    std::cout << "idx " << idx << ": " << visited[idx].runningAvg << "\n";
     if (visited[idx].runningAvg == 1) {
       ++ones;
     } else {
-//      std::cout << "P(" << idx << ") = " << visited[idx].runningAvg << "\n";
       ++nonOnes;
     }
   }
@@ -134,8 +133,9 @@ inline void crossReference(std::unordered_map<int, MyLeaf> &visited,
 
 }
 
-inline void drawCube(const int &id, boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer, const float &leafSize,
-                     std::vector<int> &coord) {
+// draw bounding cube in the PCL visualizer
+inline void drawCube(const int &id, boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer,
+                     const float &leafSize, std::vector<int> &coord) {
 
   std::stringstream ss;
   ss << id;
@@ -152,6 +152,7 @@ inline void drawCube(const int &id, boost::shared_ptr<pcl::visualization::PCLVis
 
 }
 
+// display the point cloud with bounding cube
 void visualize(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudWithProb,
                std::unordered_map<int, std::vector<int>> &coordMap,
                const float &leafSize) {
@@ -176,6 +177,7 @@ void visualize(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudWithProb,
 
 }
 
+// generate RGB point based on the probability
 inline void initRGBPoint(pcl::PointXYZRGB &newP, pcl::PointXYZ &p, const uint8_t &color) {
   newP.x = p.x;
   newP.y = p.y;
@@ -185,6 +187,7 @@ inline void initRGBPoint(pcl::PointXYZRGB &newP, pcl::PointXYZ &p, const uint8_t
   newP.b = color;
 }
 
+// map each index in the voxel grid to its corresponding 3d coordinate
 void generateCoordMap(std::unordered_map<int, std::vector<int>> &coordMap,
                       std::map<size_t, pcl::VoxelGridCovariance<pcl::PointXYZ>::Leaf> &leaves,
                       Eigen::Vector3i &divb_mul_, Eigen::Vector3i &min_b_, Eigen::Array3f &inverse_leaf_size_) {
@@ -194,6 +197,7 @@ void generateCoordMap(std::unordered_map<int, std::vector<int>> &coordMap,
   }
 }
 
+// subroutine for cropping the global fuse map
 void cropGlobalFuseMap(float x, float y, float z,
                        float len, float height) {
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>());
@@ -214,27 +218,44 @@ void cropGlobalFuseMap(float x, float y, float z,
   pcl::io::savePCDFileASCII(inputPath + outputFileName, *croppedCloud);
 }
 
+inline bool checkLeafSizeArg(std::string &leafSizeArg) {
+  return !leafSizeArg.empty() &&
+          leafSizeArg.find_first_not_of("0123456789.") == std::string::npos;
+}
+
 int main(int argc, char** argv) {
 
-  std::string out_path = "/home/junjie.chen/CLionProjects/pcl_voxelgridcovar/";
-
+  if (argc < 3) {
+    std::cout << "Syntax is: ./draw input_file.pcd leaf_size\n";
+    return -1;
+  }
   // load target point cloud
   pcl::PointCloud<pcl::PointXYZ>::Ptr targetCloud(new pcl::PointCloud<pcl::PointXYZ> ());
-  std::string in_file_path = "/media/junjie.chen/data/hitbox/A/200/A_0deg00000.pcd";
-//  std::string in_file_path = "/media/junjie.chen/data/repo/DrawBoundingBox/cmake-build-debug/room_scan1.pcd";
+  std::string in_file_path = argv[1];
 
-//  cropGlobalFuseMap(-800.0, -600.0, 0.0, 500.0, 50.0);
-//  std::string in_file_path = "/media/junjie.chen/data/global_fuse_cropped.pcd";
+  if (pcl::io::loadPCDFile<pcl::PointXYZ>(in_file_path, *targetCloud) == -1) {
+    return -1;
+  }
 
-  pcl::io::loadPCDFile<pcl::PointXYZ>(in_file_path, *targetCloud);
+  // load leaf size
+  float leafSize = -1;
+  std::string leafSizeArg = argv[2];
+  if (checkLeafSizeArg(leafSizeArg)) {
+    leafSize = std::stof(leafSizeArg);
+  }
+
+  if (leafSize <= 0) {
+    std::cout << "Given leaf_size: " << leafSizeArg
+              << "\nPlease provide positive float as leaf size\n";
+    return -1;
+  }
+
   std::cout << "point cloud size: " << targetCloud->size() << "\n";
-
   std::vector<pcl::PointXYZ,
               Eigen::aligned_allocator<pcl::PointXYZ>> points = targetCloud->points;
 
   // initialize a voxel grid covariance
   pcl::VoxelGridCovariance<pcl::PointXYZ> covar;
-  float leafSize = 5.0f;
   covar.setLeafSize(leafSize, leafSize, leafSize);
   covar.setInputCloud(targetCloud);
   covar.filter(true);
@@ -248,10 +269,6 @@ int main(int argc, char** argv) {
   Eigen::Array3f inverse_leaf_size_ = Eigen::Array3f::Ones() / leaf_size_.array();
   Eigen::Vector3i min_b_ = covar.getMinBoxCoordinates();
   Eigen::Vector3i divb_mul_ = covar.getDivisionMultiplier();
-
-//  std::cout << "min b: " << min_b_.transpose()
-//            << "\ndiv mul: " << divb_mul_.transpose()
-//            << "\ninv leaf size: " << inverse_leaf_size_.transpose() << "\n";
 
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudWithProb(new pcl::PointCloud<pcl::PointXYZRGB> ());
   cloudWithProb->points.reserve(targetCloud->points.size());
@@ -268,7 +285,7 @@ int main(int argc, char** argv) {
     // get the corresponding leaf to which this point belongs
     pcl::VoxelGridCovariance<pcl::PointXYZ>::Leaf& refLeaf = leaves[idx];
 
-    // CAUTION BUG: apply the formula to compute probability of point p
+    // apply the formula to compute probability of point p
     double probability = computeProbability(p, refLeaf);
 
     // update the point count, running sum, and running avg in MyLeaf
@@ -291,7 +308,7 @@ int main(int argc, char** argv) {
   distCloud.width = visited.size();
 
   // cross reference the point count of each index in visited map with leaves from covar
-  crossReference(visited, leaves, distCloud);
+//  crossReference(visited, leaves, distCloud);
 
   std::unordered_map<int, std::vector<int>> coordMap;
   generateCoordMap(coordMap, leaves, divb_mul_, min_b_, inverse_leaf_size_);
